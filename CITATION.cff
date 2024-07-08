@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+authors:
+- family-names: "Thomason"
+  given-names: "Aaron"
+  orcid: "https://orcid.org/0009-0007-4568-3182"
+title: "poore-58-missed-genomes"
+version: 1.0.0
+doi: 10.5281/zenodo.1234
+date-released: 2024-07-06
+url: "https://github.com/aaronneilthomason/poore-58-missed-genomes"

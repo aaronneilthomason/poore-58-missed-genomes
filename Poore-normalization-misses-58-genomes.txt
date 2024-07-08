@@ -1,0 +1,71 @@
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+if (!require("limma", quietly = TRUE))
+    BiocManager::install("limma")
+if (!require("edgeR", quietly = TRUE))
+    BiocManager::install("edgeR")
+require(limma)
+require(edgeR)
+
+setwd("C:\\tcga") # Change this to where you saved the data files below.
+#both the 18116 and 17625 data sets return the same 58 genomes that
+#should have been discarded before voom normalization.
+#metadataSamplesAll <- read.csv(file = "Metadata-TCGA-All-18116-Samples.csv",
+#		  header = TRUE,
+#		  row.names = 1,
+#		  strip.white = TRUE,
+#		  stringsAsFactors = FALSE)
+#vbDataBarnDFReconciled <- read.csv(file = "Kraken-TCGA-Raw-Data-All-18116-Samples.csv",
+#		  header = TRUE,
+#		  row.names = 1,
+#		  strip.white = TRUE,
+#		  stringsAsFactors = FALSE)
+metadataSamplesAll <- read.csv(file = "Metadata-TCGA-Kraken-17625-Samples.csv",
+		  header = TRUE,
+		  row.names = 1,
+		  strip.white = TRUE,
+		  stringsAsFactors = FALSE)
+vbDataBarnDFReconciled <- read.csv(file = "Kraken-TCGA-Raw-Data-17625-Samples.csv",
+		  header = TRUE,
+		  row.names = 1,
+		  strip.white = TRUE,
+		  stringsAsFactors = FALSE)
+		  
+metadataSamplesAllQCAML <- droplevels(metadataSamplesAll[! (is.na(metadataSamplesAll$race) | 
+												   is.na(metadataSamplesAll$portion_is_ffpe) |
+												   is.na(metadataSamplesAll$age_at_diagnosis)),])
+vbDataBarnDFReconciledQCAML <- vbDataBarnDFReconciled[rownames(metadataSamplesAllQCAML),]
+
+# Set up design matrix
+covDesignNorm <- model.matrix(~0 + sample_type +
+                                  data_submitting_center_label +
+                                  platform +
+                                  experimental_strategy +
+                                  tissue_source_site_label +
+                                  portion_is_ffpe,
+                              data = metadataSamplesAllQCAML)
+
+colnames(covDesignNorm) <- gsub('([[:punct:]])|\\s+','',colnames(covDesignNorm))
+
+# Set up counts matrix
+counts <- t(vbDataBarnDFReconciledQCAML) # DGEList object from a table of counts (rows=features, columns=samples)
+
+# Normalize using edgeR and then plug into voom
+# This is Bioconductor code to remove no information genomes prior to normalization
+dge <- DGEList(counts = counts)
+keep <- filterByExpr(dge, covDesignNorm) # logical variable indicating which genomes to keep
+
+# To get which genomes should be removed, just inverse keep against the orig data file
+discardedNames <- sub('.*__', '', colnames(vbDataBarnDFReconciledQCAML[,!keep]))
+discardedNames
+
+# Load the most stringent filtering data set to see if any discarded genomes were missed
+voom_snm_kraken <- read.csv(file = "Kraken-TCGA-Voom-SNM-Most-Stringent-Filtering-Data.csv",
+		  header = TRUE,
+		  row.names = 1,
+		  strip.white = TRUE,
+		  stringsAsFactors = FALSE)
+krakenCols <- sub('.*__', '', names(voom_snm_kraken))
+
+#This gives the 58 genomes that should have been discarded
+intersect(krakenCols, discardedNames)

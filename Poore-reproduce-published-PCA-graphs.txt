@@ -1,0 +1,154 @@
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+if (!require("limma", quietly = TRUE))
+    BiocManager::install("limma")
+if (!require("edgeR", quietly = TRUE))
+    BiocManager::install("edgeR")
+if (!require("snm", quietly = TRUE))
+    BiocManager::install("snm")
+if (!require("pvca", quietly = TRUE))
+    BiocManager::install("pvca")
+if (!require("TCGAbiolinks", quietly = TRUE))
+    BiocManager::install("TCGAbiolinks")
+if (!require("ggplot2", quietly = TRUE))
+    install.packages("ggplot2")
+if (!require("dplyr", quietly = TRUE))
+    install.packages("dplyr")
+if (!require("lme4", quietly = TRUE))
+    install.packages("lme4")
+if (!require("ggsci", quietly = TRUE))
+    install.packages("ggsci")
+if (!require("cowplot", quietly = TRUE))
+    install.packages("cowplot")
+if (!require("ggbiplot", quietly = TRUE))
+    install.packages("ggbiplot")
+if (!require("doMC", quietly = TRUE))
+    install.packages("doMC", repos="http://R-Forge.R-project.org")
+
+require(limma)
+require(edgeR)	
+require(snm)
+require(pvca)
+require(TCGAbiolinks)
+require(ggplot2)
+require(dplyr)
+require(lme4)
+require(ggsci)
+require(cowplot)
+require(ggbiplot)
+require(doMC)
+
+setwd("C:\\tcga") # Change this to where you saved the data files below.
+metadataSamplesAll <- read.csv(file = "Metadata-TCGA-Kraken-17625-Samples.csv",
+		  header = TRUE,
+		  row.names = 1,
+		  strip.white = TRUE,
+		  stringsAsFactors = FALSE)
+
+vbDataBarnDFReconciled <- read.csv(file = "Kraken-TCGA-Raw-Data-17625-Samples.csv",
+		  header = TRUE,
+		  row.names = 1,
+		  strip.white = TRUE,
+		  stringsAsFactors = FALSE)
+		  
+metadataSamplesAllQCAML <- droplevels(metadataSamplesAll[! (is.na(metadataSamplesAll$race) | 
+												   is.na(metadataSamplesAll$portion_is_ffpe) |
+												   is.na(metadataSamplesAll$age_at_diagnosis)),])
+vbDataBarnDFReconciledQCAML <- vbDataBarnDFReconciled[rownames(metadataSamplesAllQCAML),]
+
+# Set up design matrix
+covDesignNorm <- model.matrix(~0 + sample_type +
+                                  data_submitting_center_label +
+                                  platform +
+                                  experimental_strategy +
+                                  tissue_source_site_label +
+                                  portion_is_ffpe,
+                              data = metadataSamplesAllQCAML)
+
+colnames(covDesignNorm) <- gsub('([[:punct:]])|\\s+','',colnames(covDesignNorm))
+
+# Set up counts matrix
+counts <- t(vbDataBarnDFReconciledQCAML) # DGEList object from a table of counts (rows=features, columns=samples)
+
+# Normalize using edgeR and then plug into voom
+dge <- DGEList(counts = counts)
+keep <- filterByExpr(dge, covDesignNorm)
+dge <- dge[keep,,keep.lib.sizes=FALSE]
+print("Now normalizing data...")
+dge <- calcNormFactors(dge, method = "TMM")
+print("Now applying voom on normalized data...")
+vdge <- voom(dge, design = covDesignNorm, plot = TRUE, save.plot = TRUE, normalize.method="none")
+
+
+qcMetadata <- metadataSamplesAllQCAML
+
+# Apply
+bio.var.sample.type <- model.matrix(~sample_type, #sample_type, # histological_diagnosis_label and disease_type tried but cause function to fail
+                        data=qcMetadata)
+bio.var.gender <- model.matrix(~gender, #sample_type, # histological_diagnosis_label and disease_type tried but cause function to fail
+                        data=qcMetadata)
+adj.var <- model.matrix(~data_submitting_center_label +
+                          platform +
+                          experimental_strategy +
+                          tissue_source_site_label +
+                          portion_is_ffpe,
+                        data=qcMetadata)
+colnames(bio.var.sample.type) <- gsub('([[:punct:]])|\\s+','',colnames(bio.var.sample.type))
+colnames(bio.var.gender) <- gsub('([[:punct:]])|\\s+','',colnames(bio.var.gender))
+colnames(adj.var) <- gsub('([[:punct:]])|\\s+','',colnames(adj.var))
+
+# Takes 18 minutes to run snm
+snmDataObjSampleTypeWithExpStrategyFA <- snm(raw.dat = vdge$E, 
+                                            bio.var = bio.var.sample.type, 
+                                            adj.var = adj.var, 
+                                            rm.adj=TRUE,
+                                            verbose = TRUE,
+                                            diagnose = TRUE)
+snmDataSampleTypeWithExpStrategyFA <- t(snmDataObjSampleTypeWithExpStrategyFA$norm.dat)
+
+voom_data <- t(vdge$E) #transpose to match original data
+snm_data <- snmDataSampleTypeWithExpStrategyFA
+
+# Let's save thes newly created voom-snm files
+write.csv(voom_data, "Kraken-TCGA-Voom-ALL-191-NO-INFO-GENOMES-REMOVED.csv")
+write.csv(snm_data, "Kraken-TCGA-Voom-SNM-ALL-191-NO-INFO-GENOMES-REMOVED.csv")
+
+# PCA plotting to visually examine batch effects and batch correction
+pcaPlotting <- function(pcaObject,pcChoices, dataLabels, factorString, titleString){
+  theme_update(plot.title = element_text(hjust = 0.5))
+  g <- ggbiplot(pcaObject,pcChoices, obs.scale = 1, var.scale = 1,
+                groups = dataLabels, ellipse = TRUE,
+                alpha = 0.2,
+                circle = TRUE,
+				var.axes=FALSE) + 
+    scale_color_nejm() +
+    theme_bw() + 
+    #theme(legend.direction = "horizontal", legend.position = "top") +
+    ggtitle(titleString) + theme(plot.title = element_text(hjust = 0.5))
+  print(g)
+} 
+
+# These match the published graphs because these removed all 191 no-info genomes
+unnormalizedPCAPlotFA <- pcaPlotting(pcaObject = prcomp(t(vdge$E)),
+                                   pcChoices = c(1,2),
+                                   dataLabels = qcMetadata$data_submitting_center_label,
+                                   factorString = "Batch",
+                                   titleString = "PCA w/o Batch Correction w/ 191 GENOMES-REMOVED")
+ggsave(plot = unnormalizedPCAPlotFA, 
+       filename = "unnormalizedPCAPlotFA_DecreasedOpacity_NEJM.png",
+       width = 16.2,
+       height = 5.29,
+       units = "in",
+       dpi = "retina")
+	   
+snmPCAPlotSampleTypeFA <- pcaPlotting(pcaObject = prcomp(snm_data),
+                          pcChoices = c(1,2),
+                          dataLabels = qcMetadata$data_submitting_center_label,
+                          factorString = "Sequencing Center",
+                          titleString = "PCA Voom-SNM w/ 191 GENOMES-REMOVED")
+ggsave(plot = snmPCAPlotSampleTypeFA, 
+       filename = "snmPCAPlotSampleTypeFA_DecreasedOpacity_NEJM.png",
+       width = 16.2,
+       height = 5.29,
+       units = "in",
+       dpi = "retina")

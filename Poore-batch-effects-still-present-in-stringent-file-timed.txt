@@ -1,0 +1,58 @@
+# How long does it take to verify if Kraken-TCGA-Voom-SNM-Most-Stringent-Filtering-Data.csv
+# is the correct file?
+start.time <- Sys.time()
+if (!require("ggsci", quietly = TRUE))
+    install.packages("ggsci")
+if (!require("ggbiplot", quietly = TRUE))
+    install.packages("ggbiplot")
+require(ggsci)
+require(ggbiplot)
+
+setwd("C:\\tcga") # Change this to where you saved the data files below.
+metadataSamplesAll <- read.csv(file = "Metadata-TCGA-Kraken-17625-Samples.csv",
+		  header = TRUE,
+		  row.names = 1,
+		  strip.white = TRUE,
+		  stringsAsFactors = FALSE)
+qcMetadata <- droplevels(metadataSamplesAll[! (is.na(metadataSamplesAll$race) | 
+											   is.na(metadataSamplesAll$portion_is_ffpe) |
+											   is.na(metadataSamplesAll$age_at_diagnosis)),])
+											   
+# Load the most stringent filtering data set to see if it has batch effects.
+# If it does have batch effects, does it match what the authors published?
+# Let's find out.
+voom_snm_kraken <- read.csv(file = "Kraken-TCGA-Voom-SNM-Most-Stringent-Filtering-Data.csv",
+		  header = TRUE,
+		  row.names = 1,
+		  strip.white = TRUE,
+		  stringsAsFactors = FALSE)
+
+# PCA plotting to visually examine batch effects and batch correction
+pcaPlotting <- function(pcaObject,pcChoices, dataLabels, factorString, titleString){
+  theme_update(plot.title = element_text(hjust = 0.5))
+  g <- ggbiplot(pcaObject,pcChoices, obs.scale = 1, var.scale = 1,
+                groups = dataLabels, ellipse = TRUE,
+                alpha = 0.2,
+                circle = TRUE,
+				var.axes=FALSE) + 
+    scale_color_nejm() +
+    theme_bw() + 
+    #theme(legend.direction = "horizontal", legend.position = "top") +
+    ggtitle(titleString) + theme(plot.title = element_text(hjust = 0.5))
+  print(g)
+}
+krakenPCAPlotSampleTypeFA <- pcaPlotting(pcaObject = prcomp(voom_snm_kraken),
+                          pcChoices = c(1,2),
+                          dataLabels = qcMetadata$data_submitting_center_label,
+                          factorString = "Sequencing Center",
+                          titleString = "PCA on Kraken-TCGA-Voom-SNM-Most-Stringent-Filtering-Data.csv")
+ggsave(plot = krakenPCAPlotSampleTypeFA, 
+       filename = "kralemPCAPlotSampleTypeFA.png",
+       width = 16.2,
+       height = 5.29,
+       units = "in",
+       dpi = "retina")
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
